@@ -1,10 +1,11 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, Check, Flower2, Sparkles, Bell, Palette } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
-import { useApp } from '@/providers/AppProvider';
+import { useRevenueCat } from '@/providers/RevenueCatProvider';
+import { PurchasesPackage } from 'react-native-purchases';
 
 const features = [
   {
@@ -32,20 +33,78 @@ const features = [
 export default function PaywallScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { setPremium } = useApp();
   const colors = Colors.light;
+  
+  const { 
+    currentOffering, 
+    isLoadingOfferings, 
+    purchasePackage, 
+    restorePurchases,
+    isPurchasing, 
+    isRestoring,
+    isPremium
+  } = useRevenueCat();
 
-  const handlePurchase = (plan: 'monthly' | 'yearly') => {
-    console.log('[Paywall] User selected plan:', plan);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setPremium(true);
-    router.replace('/');
+  const monthlyPackage = currentOffering?.availablePackages.find(
+    pkg => pkg.identifier === 'monthly' || pkg.identifier === '$rc_monthly'
+  );
+  const yearlyPackage = currentOffering?.availablePackages.find(
+    pkg => pkg.identifier === 'annual' || pkg.identifier === '$rc_annual'
+  );
+
+  const handlePurchase = async (pkg: PurchasesPackage | undefined) => {
+    if (!pkg) {
+      console.log('[Paywall] No package available');
+      return;
+    }
+
+    console.log('[Paywall] Purchasing:', pkg.identifier);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    try {
+      await purchasePackage(pkg);
+      console.log('[Paywall] Purchase successful');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.replace('/');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Purchase failed';
+      console.error('[Paywall] Purchase error:', errorMessage);
+      if (!errorMessage.includes('cancelled') && !errorMessage.includes('PURCHASE_CANCELLED')) {
+        Alert.alert('Purchase Failed', 'Please try again later.');
+      }
+    }
+  };
+
+  const handleRestore = async () => {
+    console.log('[Paywall] Restoring purchases');
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    try {
+      await restorePurchases();
+      if (isPremium) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Restored', 'Your premium access has been restored.');
+        router.replace('/');
+      } else {
+        Alert.alert('No Purchases', 'No previous purchases found.');
+      }
+    } catch (error) {
+      console.error('[Paywall] Restore error:', error);
+      Alert.alert('Restore Failed', 'Please try again later.');
+    }
   };
 
   const handleSkip = () => {
     console.log('[Paywall] User skipped paywall');
     router.replace('/');
   };
+
+  const formatPrice = (pkg: PurchasesPackage | undefined) => {
+    if (!pkg) return '';
+    return pkg.product.priceString;
+  };
+
+  const isLoading = isPurchasing || isRestoring;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -54,6 +113,7 @@ export default function PaywallScreen() {
           style={[styles.closeButton, { backgroundColor: colors.backgroundSecondary }]}
           onPress={handleSkip}
           activeOpacity={0.7}
+          disabled={isLoading}
         >
           <X size={20} color={colors.textSecondary} />
         </TouchableOpacity>
@@ -98,46 +158,78 @@ export default function PaywallScreen() {
           ))}
         </View>
 
-        <View style={styles.pricingSection}>
-          <TouchableOpacity
-            style={[styles.planCard, styles.planCardYearly, { backgroundColor: colors.text }]}
-            onPress={() => handlePurchase('yearly')}
-            activeOpacity={0.8}
-          >
-            <View style={[styles.bestValue, { backgroundColor: colors.gold }]}>
-              <Text style={styles.bestValueText}>BEST VALUE</Text>
-            </View>
-            <Text style={[styles.planTitle, { color: colors.background }]}>Yearly</Text>
-            <View style={styles.planPriceRow}>
-              <Text style={[styles.planPrice, { color: colors.background }]}>$19.99</Text>
-              <Text style={[styles.planPeriod, { color: colors.background, opacity: 0.7 }]}>/year</Text>
-            </View>
-            <Text style={[styles.planSavings, { color: colors.gold }]}>
-              Save 44% • $1.67/month
+        {isLoadingOfferings ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.gold} />
+            <Text style={[styles.loadingText, { color: colors.textMuted }]}>
+              Loading plans...
             </Text>
-          </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.pricingSection}>
+            <TouchableOpacity
+              style={[styles.planCard, styles.planCardYearly, { backgroundColor: colors.text }]}
+              onPress={() => handlePurchase(yearlyPackage)}
+              activeOpacity={0.8}
+              disabled={isLoading || !yearlyPackage}
+            >
+              <View style={[styles.bestValue, { backgroundColor: colors.gold }]}>
+                <Text style={styles.bestValueText}>BEST VALUE</Text>
+              </View>
+              <Text style={[styles.planTitle, { color: colors.background }]}>Yearly</Text>
+              <View style={styles.planPriceRow}>
+                <Text style={[styles.planPrice, { color: colors.background }]}>
+                  {formatPrice(yearlyPackage) || '$19.99'}
+                </Text>
+                <Text style={[styles.planPeriod, { color: colors.background, opacity: 0.7 }]}>/year</Text>
+              </View>
+              <Text style={[styles.planSavings, { color: colors.gold }]}>
+                Save 44% • $1.67/month
+              </Text>
+              {isPurchasing && (
+                <ActivityIndicator 
+                  style={styles.purchaseIndicator} 
+                  size="small" 
+                  color={colors.background} 
+                />
+              )}
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.planCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-            onPress={() => handlePurchase('monthly')}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.planTitle, { color: colors.text }]}>Monthly</Text>
-            <View style={styles.planPriceRow}>
-              <Text style={[styles.planPrice, { color: colors.text }]}>$2.99</Text>
-              <Text style={[styles.planPeriod, { color: colors.textMuted }]}>/month</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity
+              style={[styles.planCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={() => handlePurchase(monthlyPackage)}
+              activeOpacity={0.8}
+              disabled={isLoading || !monthlyPackage}
+            >
+              <Text style={[styles.planTitle, { color: colors.text }]}>Monthly</Text>
+              <View style={styles.planPriceRow}>
+                <Text style={[styles.planPrice, { color: colors.text }]}>
+                  {formatPrice(monthlyPackage) || '$2.99'}
+                </Text>
+                <Text style={[styles.planPeriod, { color: colors.textMuted }]}>/month</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
 
-        <TouchableOpacity style={styles.skipButton} onPress={handleSkip}>
+        <TouchableOpacity style={styles.skipButton} onPress={handleSkip} disabled={isLoading}>
           <Text style={[styles.skipText, { color: colors.textMuted }]}>
             Continue with Free
           </Text>
         </TouchableOpacity>
 
+        <TouchableOpacity 
+          style={styles.restoreButton} 
+          onPress={handleRestore}
+          disabled={isLoading}
+        >
+          <Text style={[styles.restoreText, { color: colors.textSecondary }]}>
+            {isRestoring ? 'Restoring...' : 'Restore Purchases'}
+          </Text>
+        </TouchableOpacity>
+
         <Text style={[styles.termsText, { color: colors.textMuted }]}>
-          Cancel anytime • Restore purchases
+          Cancel anytime • Auto-renews unless cancelled
         </Text>
       </ScrollView>
     </View>
@@ -181,7 +273,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 34,
-    fontWeight: '300',
+    fontWeight: '300' as const,
     textAlign: 'center',
     lineHeight: 42,
     marginBottom: 12,
@@ -212,11 +304,19 @@ const styles = StyleSheet.create({
   },
   featureTitle: {
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '500' as const,
     marginBottom: 2,
   },
   featureDescription: {
     fontSize: 14,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 15,
   },
   pricingSection: {
     gap: 12,
@@ -242,13 +342,13 @@ const styles = StyleSheet.create({
   },
   bestValueText: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '700' as const,
     color: Colors.light.background,
     letterSpacing: 0.5,
   },
   planTitle: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '600' as const,
     marginBottom: 4,
   },
   planPriceRow: {
@@ -257,7 +357,7 @@ const styles = StyleSheet.create({
   },
   planPrice: {
     fontSize: 28,
-    fontWeight: '700',
+    fontWeight: '700' as const,
   },
   planPeriod: {
     fontSize: 16,
@@ -265,8 +365,13 @@ const styles = StyleSheet.create({
   },
   planSavings: {
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '500' as const,
     marginTop: 4,
+  },
+  purchaseIndicator: {
+    position: 'absolute',
+    right: 20,
+    top: '50%',
   },
   skipButton: {
     alignItems: 'center',
@@ -274,10 +379,19 @@ const styles = StyleSheet.create({
   },
   skipText: {
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '500' as const,
+  },
+  restoreButton: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  restoreText: {
+    fontSize: 14,
+    textDecorationLine: 'underline',
   },
   termsText: {
     fontSize: 13,
     textAlign: 'center',
+    marginTop: 8,
   },
 });

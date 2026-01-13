@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import createContextHook from '@nkzw/create-context-hook';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useEffect, useCallback } from 'react';
+import { useRevenueCat } from './RevenueCatProvider';
 
 interface AppSettings {
   hasCompletedOnboarding: boolean;
@@ -26,6 +27,7 @@ const STORAGE_KEY = 'daily_dharma_settings';
 export const [AppProvider, useApp] = createContextHook(() => {
   const queryClient = useQueryClient();
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
+  const { isPremium: rcIsPremium } = useRevenueCat();
 
   const settingsQuery = useQuery({
     queryKey: ['app-settings'],
@@ -77,6 +79,8 @@ export const [AppProvider, useApp] = createContextHook(() => {
     updateSettings({ isPremium });
   }, [updateSettings]);
 
+  const isPremium = rcIsPremium || settings.isPremium;
+
   const toggleBookmark = useCallback((verseId: number) => {
     const bookmarks = settings.bookmarkedVerses.includes(verseId)
       ? settings.bookmarkedVerses.filter(id => id !== verseId)
@@ -90,6 +94,7 @@ export const [AppProvider, useApp] = createContextHook(() => {
 
   return {
     settings,
+    isPremium,
     isLoading: settingsQuery.isLoading,
     updateSettings,
     completeOnboarding,

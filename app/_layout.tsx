@@ -4,6 +4,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AppProvider } from "@/providers/AppProvider";
+import { RevenueCatProvider } from "@/providers/RevenueCatProvider";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -28,9 +29,11 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <GestureHandlerRootView style={{ flex: 1 }}>
-        <AppProvider>
-          <RootLayoutNav />
-        </AppProvider>
+        <RevenueCatProvider>
+          <AppProvider>
+            <RootLayoutNav />
+          </AppProvider>
+        </RevenueCatProvider>
       </GestureHandlerRootView>
     </QueryClientProvider>
   );
